@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Title / Highlights Keyword Checker</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #222; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  h2 { font-size: 15px; margin: 0 0 4px; }
+  p.sub { color: #666; font-size: 14px; margin-top: 0; }
+  section { margin-top: 28px; padding-top: 20px; border-top: 1px solid #eee; }
+  section:first-of-type { border-top: none; padding-top: 0; }
+  label { font-size: 13px; color: #555; display: block; margin: 14px 0 6px; font-weight: 600; }
+  textarea { width: 100%; box-sizing: border-box; font-size: 14px; padding: 10px; border-radius: 8px; border: 1px solid #ccc; resize: vertical; font-family: inherit; }
+  textarea.mono { font-family: monospace; font-size: 12.5px; height: 140px; }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  .meta { display: flex; justify-content: space-between; margin-top: 4px; font-size: 12px; color: #777; }
+  .meta .over { color: #c0392b; font-weight: 600; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .colTitle { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 8px; }
+  .row { display: flex; justify-content: space-between; padding: 5px 8px; border-radius: 6px; font-size: 13px; margin-bottom: 2px; }
+  .row .rank { font-size: 11px; color: #999; }
+  .row.hit-title { background: #e3f6e5; color: #1e7d32; }
+  .row.hit-title .rank { color: #1e7d32; }
+  .row.hit-hl { background: #e3edfc; color: #1a5fb4; }
+  .row.hit-hl .rank { color: #1a5fb4; }
+  .row.hit-both { background: #f1e6fb; color: #7b1fa2; }
+  .row.hit-both .rank { color: #7b1fa2; }
+  .empty { font-size: 13px; color: #999; padding: 6px 8px; }
+  .legend { display: flex; gap: 18px; font-size: 12px; color: #555; margin: 12px 0 4px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  button { font-size: 13px; padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fafafa; cursor: pointer; margin-top: 12px; }
+  button:hover { background: #f0f0f0; }
+  #checkerSection { display: none; }
+  details summary { cursor: pointer; font-size: 13px; color: #666; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Title / Highlights keyword checker</h1>
+<p class="sub">Paste the keyword lists you want to target, then paste your title or highlights draft to see which keywords made it in.</p>
+
+<section>
+  <h2>1. Enter your keyword lists</h2>
+  <p class="hint">One keyword per line. If a keyword has variants (plural, alternate spelling, etc.), group them on one line separated by "/", e.g. <code>book / books</code>.</p>
+
+  <label for="titlePoolEdit">Keywords for the title</label>
+  <textarea id="titlePoolEdit" class="mono" placeholder="One keyword per line"></textarea>
+
+  <label for="hlPoolEdit">Keywords for item highlights</label>
+  <textarea id="hlPoolEdit" class="mono" placeholder="One keyword per line"></textarea>
+
+  <button id="loadBtn">Load keywords</button>
+</section>
+
+<section id="checkerSection">
+  <h2>2. Check your draft</h2>
+
+  <label for="titleInput">Title draft (75 char limit)</label>
+  <textarea id="titleInput" rows="2" placeholder="Paste your title suggestion here"></textarea>
+  <div class="meta"><span id="titleMatches">0 keywords matched</span><span id="titleCount">0 / 75</span></div>
+
+  <label for="hlInput">Highlights draft (125 char limit)</label>
+  <textarea id="hlInput" rows="2" placeholder="Paste your item highlights suggestion here"></textarea>
+  <div class="meta"><span id="hlMatches">0 keywords matched</span><span id="hlCount">0 / 125</span></div>
+
+  <div class="legend">
+    <span><i style="background:#e3f6e5; border:1px solid #1e7d32;"></i>Found in title</span>
+    <span><i style="background:#e3edfc; border:1px solid #1a5fb4;"></i>Found in highlights</span>
+    <span><i style="background:#f1e6fb; border:1px solid #7b1fa2;"></i>Found in both</span>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="colTitle">Title keywords</div>
+      <div id="titleList"></div>
+    </div>
+    <div>
+      <div class="colTitle">Highlights keywords</div>
+      <div id="hlList"></div>
+    </div>
+  </div>
+
+  <details style="margin-top:20px;">
+    <summary>Edit keyword lists again</summary>
+    <p class="hint" style="margin-top:8px;">Edit the boxes in step 1 above, then click "Load keywords" again to refresh this checker.</p>
+  </details>
+</section>
+
+<script>
+let titlePool = [];
+let hlPool = [];
+
+function parseLine(line){
+  line = line.trim();
+  if (!line) return null;
+  // pipe format: rank | keyword | variant1,variant2
+  if (line.includes('|')) {
+    const parts = line.split('|').map(s => s.trim());
+    if (parts.length >= 2) {
+      const rank = parts[0];
+      const kw = parts[1];
+      const variants = parts[2] ? parts[2].split(',').map(s=>s.trim()).filter(Boolean) : [kw];
+      return { rank: /^\d+\s*\/\s*\d+$/.test(rank) ? rank : '', kw, variants };
+    }
+  }
+  // leading rank like "3/75 dog" or "3/75  dog / dogs"
+  let rank = '';
+  const rankMatch = line.match(/^(\d+\s*\/\s*\d+)\s+(.*)$/);
+  let rest = line;
+  if (rankMatch) { rank = rankMatch[1]; rest = rankMatch[2]; }
+  // simple slash-separated variants: "dog / dogs"
+  const variants = rest.split('/').map(s => s.trim()).filter(Boolean);
+  const kw = variants[0] || rest;
+  return { rank, kw, variants: variants.length ? variants : [kw] };
+}
+
+function textToPool(text){
+  return text.split('\n').map(parseLine).filter(Boolean);
+}
+
+function esc(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function matches(text, variants){
+  const padded = ' ' + text.toLowerCase() + ' ';
+  return variants.some(v => {
+    const pattern = esc(v.toLowerCase()).replace(/\s+/g, '\\s+');
+    const re = new RegExp('(^|[^a-z0-9])' + pattern + '($|[^a-z0-9])', 'i');
+    return re.test(padded);
+  });
+}
+
+function renderList(container, pool, titleText, hlText){
+  let ownCount = 0;
+  container.innerHTML = '';
+  if (pool.length === 0) {
+    container.innerHTML = '<div class="empty">No keywords loaded yet</div>';
+    return 0;
+  }
+  pool.forEach(item => {
+    const inTitle = titleText.trim().length > 0 && matches(titleText, item.variants);
+    const inHl = hlText.trim().length > 0 && matches(hlText, item.variants);
+    let cls = '';
+    if (inTitle && inHl) cls = ' hit-both';
+    else if (inTitle) cls = ' hit-title';
+    else if (inHl) cls = ' hit-hl';
+    if (inTitle || inHl) ownCount++;
+    const row = document.createElement('div');
+    row.className = 'row' + cls;
+    row.innerHTML = '<span>' + item.kw + '</span>' + (item.rank ? '<span class="rank">' + item.rank + '</span>' : '');
+    container.appendChild(row);
+  });
+  return ownCount;
+}
+
+const titleInput = document.getElementById('titleInput');
+const hlInput = document.getElementById('hlInput');
+const titleList = document.getElementById('titleList');
+const hlList = document.getElementById('hlList');
+const titleMatches = document.getElementById('titleMatches');
+const hlMatches = document.getElementById('hlMatches');
+const titleCount = document.getElementById('titleCount');
+const hlCount = document.getElementById('hlCount');
+const titlePoolEdit = document.getElementById('titlePoolEdit');
+const hlPoolEdit = document.getElementById('hlPoolEdit');
+const checkerSection = document.getElementById('checkerSection');
+
+function countMatches(pool, text){
+  if (text.trim().length === 0) return 0;
+  return pool.filter(item => matches(text, item.variants)).length;
+}
+
+function updateAll(){
+  const t = titleInput.value;
+  const h = hlInput.value;
+
+  renderList(titleList, titlePool, t, h);
+  renderList(hlList, hlPool, t, h);
+
+  const tn = countMatches(titlePool, t);
+  titleMatches.textContent = tn + ' keyword' + (tn===1?'':'s') + ' matched';
+  titleCount.textContent = t.length + ' / 75';
+  titleCount.className = t.length > 75 ? 'over' : '';
+
+  const hn = countMatches(hlPool, h);
+  hlMatches.textContent = hn + ' keyword' + (hn===1?'':'s') + ' matched';
+  hlCount.textContent = h.length + ' / 125';
+  hlCount.className = h.length > 125 ? 'over' : '';
+}
+
+titleInput.addEventListener('input', updateAll);
+hlInput.addEventListener('input', updateAll);
+
+document.getElementById('loadBtn').addEventListener('click', () => {
+  titlePool = textToPool(titlePoolEdit.value);
+  hlPool = textToPool(hlPoolEdit.value);
+  checkerSection.style.display = 'block';
+  updateAll();
+  checkerSection.scrollIntoView({ behavior: 'smooth' });
+});
+</script>
+</body>
+</html>
